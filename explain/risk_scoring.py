@@ -6,17 +6,11 @@ import numpy as np
 import pandas as pd
 
 from explain.shap_explainer import AlertExplainer
-from features.feature_engineering import FEATURE_COLUMNS
-from models.attack_classifier import AttackClassifier
-from models.attack_classifier import DEFAULT_CONFIG as CLASSIFIER_CONFIG
 
 DEFAULT_CONFIG = {
     "predictions_path": "data/predictions.csv",
     "features_path": "data/features.csv",
-    "classifier_artifact_path": CLASSIFIER_CONFIG["artifact_path"],
     "alerts_path": "data/alerts.csv",
-    "classifier_weight": 0.6,
-    "anomaly_weight": 0.4,
     "top_reasons": 3,
 }
 
@@ -37,6 +31,18 @@ def _normalize(values, population_min, population_max):
 
 
 def compute_risk_scores(config=None):
+    """risk_score is 100x the pipeline's own validated combined_risk (classifier p_attack +
+    Isolation Forest + LSTM sequence detector, weighted and selected on validation by
+    models/train.py) -- the same number that drives the hybrid alert rule and the top-1%
+    budget, not a separately recomputed 2-signal blend. That keeps the analyst-facing risk
+    score consistent with what actually triggered the alert.
+
+    Checked empirically: for unknown_anomaly events (classifier itself predicted "normal", so
+    combined_risk's classifier term -- 70% of the weight -- is near-zero), this dragged every
+    such event into the "low" tier even when the IF or sequence safety net fired hard, which is
+    backwards for exactly the case that safety net exists to catch. Those rows are overridden
+    with a pure IF+sequence blend (no classifier term) instead.
+    """
     config = {**DEFAULT_CONFIG, **(config or {})}
 
     predictions = pd.read_csv(config["predictions_path"])
@@ -44,24 +50,21 @@ def compute_risk_scores(config=None):
     features = pd.read_csv(config["features_path"], parse_dates=["timestamp"])
     merged = alerted.merge(features, on="event_id", how="left", suffixes=("", "_feat"))
 
-    classifier = AttackClassifier.load(config["classifier_artifact_path"])
-    X = merged[FEATURE_COLUMNS].astype(float)
-    probs = classifier.predict_proba(X)
-    classifier_max_prob = probs.max(axis=1)
+    risk_score = 100 * merged["combined_risk"].to_numpy()
 
-    normalized_anomaly = _normalize(
-        merged["anomaly_score"].to_numpy(), predictions["anomaly_score"].min(), predictions["anomaly_score"].max()
-    )
-
-    # unknown_anomaly = classifier itself predicted "normal" (its "confidence" would just be
-    # P(normal), meaningless as attack confidence) -- weight the IF anomaly score 100% instead.
     is_unknown = (merged["predicted_label"] == "unknown_anomaly").to_numpy()
-    weighted = config["classifier_weight"] * classifier_max_prob + config["anomaly_weight"] * normalized_anomaly
-    risk_score = 100 * np.where(is_unknown, normalized_anomaly, weighted)
+    if is_unknown.any():
+        normalized_anomaly = _normalize(
+            merged["anomaly_score"].to_numpy(), predictions["anomaly_score"].min(), predictions["anomaly_score"].max()
+        )
+        normalized_sequence = _normalize(
+            merged["sequence_score"].to_numpy(), predictions["sequence_score"].min(), predictions["sequence_score"].max()
+        )
+        unknown_score = 100 * (normalized_anomaly + normalized_sequence) / 2
+        risk_score = np.where(is_unknown, unknown_score, risk_score)
 
     result = merged[["event_id", "user_id", "timestamp", "predicted_label", "true_label"]].copy()
-    result["classifier_confidence"] = np.where(is_unknown, np.nan, classifier_max_prob)
-    result["normalized_anomaly_score"] = normalized_anomaly
+    result["combined_risk"] = merged["combined_risk"].to_numpy()
     result["risk_score"] = risk_score.round(2)
     result["risk_tier"] = risk_tier(risk_score)
     return result

@@ -171,7 +171,10 @@ def _sample_auth_method(user, rng):
 
 
 def _sample_session_duration(user, rng):
-    return round(float(np.random.lognormal(mean=user["session_duration_mu"], sigma=0.4)), 1)
+    # rng.lognormvariate (stdlib) is the same lognormal(mu, sigma) distribution as
+    # np.random.lognormal -- using it keeps every draw on the one seeded `rng` instance
+    # instead of numpy's separate global random state.
+    return round(rng.lognormvariate(user["session_duration_mu"], 0.4), 1)
 
 
 def _sample_command_sequence(event_type, resource, rng):
@@ -267,14 +270,14 @@ def _sample_timestamp(day, user, rng):
     return day + pd.Timedelta(hours=hour, minutes=rng.randint(0, 59), seconds=rng.randint(0, 59))
 
 
-def generate_normal_events(users, config, rng, start_ts):
+def generate_normal_events(users, config, rng, np_rng, start_ts):
     events = []
     for user in users:
         for day_offset in range(config["num_days"]):
             day = start_ts + pd.Timedelta(days=day_offset)
             is_weekend = day.weekday() >= 5
             lam = user["daily_event_mean"] * (user["weekend_factor"] if is_weekend else 1.0)
-            n_events = np.random.poisson(lam) if lam > 0 else 0
+            n_events = int(np_rng.poisson(lam)) if lam > 0 else 0
             if n_events == 0:
                 continue
 
@@ -622,7 +625,7 @@ def generate_dataset(config=None):
     config = {**DEFAULT_CONFIG, **(config or {})}
 
     rng = random.Random(config["seed"])
-    np.random.seed(config["seed"])
+    np_rng = np.random.default_rng(config["seed"])
     fake = Faker()
     Faker.seed(config["seed"])
 
@@ -630,7 +633,7 @@ def generate_dataset(config=None):
     end_ts = start_ts + pd.Timedelta(days=config["num_days"])
 
     users = generate_user_profiles(config, rng)
-    events = generate_normal_events(users, config, rng, start_ts)
+    events = generate_normal_events(users, config, rng, np_rng, start_ts)
 
     for attack_type, generator_fn in ATTACK_GENERATORS.items():
         n_incidents = _num_incidents(config, attack_type)

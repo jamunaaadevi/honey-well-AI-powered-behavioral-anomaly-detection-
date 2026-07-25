@@ -4,6 +4,9 @@ Shows the pipeline stays conservative -- no "is_new_*" flag fires just because t
 entity has no history yet, and the trained models don't spike a risk score on pure
 novelty. Also exercises models.baseline_profile.EntityProfile.deviation_score()
 directly against a genuinely foreign follow-up event.
+
+Depends on artifacts trained by the current models/train.py (post train/val/test split) --
+rerun `python -m models.train` first if the saved anomaly detector / classifier are stale.
 """
 
 import pandas as pd

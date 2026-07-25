@@ -57,17 +57,31 @@ def _haversine_km(lat1, lon1, lat2, lon2):
 
 
 def build_user_baselines(df, config):
-    """Per user: first `baseline_fraction` of events (chronological) only.
+    """Per user: first `baseline_fraction` of that entity's NORMAL-labeled events only.
+
+    Attack events must never be used to define "normal" for a compromised entity --
+    df is sorted chronologically but attacks are scattered randomly across the 30-day
+    period, so without this filter an attack that happens to land in an entity's early
+    history would get absorbed into that entity's own baseline (its resources/hours/etc.
+    would look "usual"), silently weakening detection of that exact pattern later. So we
+    filter to label == "normal" *before* taking the chronological first
+    `baseline_fraction` -- the 60% is 60% of each entity's normal history, not 60% of
+    all its events regardless of label.
 
     Fits one models.baseline_profile.EntityProfile per entity (persisted to JSON as the
     official baseline artifact) and derives the merge-pair lookup tables straight from
     each profile's own sets/stats -- the profiles are the source of truth here, this just
     flattens them into the long-format tables the fast vectorized merges below need.
     """
-    rank = df.groupby("user_id").cumcount()
-    user_n = df.groupby("user_id")["user_id"].transform("size")
+    normal_df = df[df["label"] == "normal"]
+    excluded = len(df) - len(normal_df)
+    print(f"  build_user_baselines: excluded {excluded} non-normal events from baseline "
+          f"consideration ({excluded / len(df):.2%} of all events)")
+
+    rank = normal_df.groupby("user_id").cumcount()
+    user_n = normal_df.groupby("user_id")["user_id"].transform("size")
     cutoff = (user_n * config["baseline_fraction"]).astype(int)
-    baseline_df = df[rank < cutoff]
+    baseline_df = normal_df[rank < cutoff]
 
     store = EntityProfileStore.fit(baseline_df, entity_col="user_id")
     if config.get("profile_store_path"):
@@ -272,6 +286,8 @@ def compute_features(df, config=None):
 
     baselines = build_user_baselines(df, config)
     df = _merge_baseline_flags(df, baselines, config)
+    print(f"  has_baseline: {int(df['has_baseline'].sum())} of {len(df)} events "
+          f"({df['has_baseline'].mean():.1%})")
     df = _add_command_features(df, baselines)
     df = _add_geo_velocity(df, config)
     df = _add_rolling_window_features(df, config)

@@ -40,7 +40,12 @@ DEFAULT_CONFIG = {
     "features_path": FEATURES_CONFIG["output_path"],  # only its timestamp/event_id columns, to find the split boundary
     "predictions_path": "data/predictions.csv",  # last batch run's scores, for one-time threshold calibration
     "profile_store_path": FEATURES_CONFIG["profile_store_path"],
-    "train_fraction": 0.7,  # must match models/train.py's split
+    # must match models/train.py's chronological train/val/test split (train_fraction +
+    # val_fraction = 0.8 marks where the true held-out test period starts). Everything before
+    # that boundary -- train AND validation -- is "history to warm up on"; only the test period
+    # is streamed and timed below.
+    "train_fraction": 0.6,
+    "val_fraction": 0.2,
     "min_baseline_events": FEATURES_CONFIG["min_baseline_events"],
     "sensitive_resources": FEATURES_CONFIG["sensitive_resources"],
     "geo_velocity_cap_kmh": FEATURES_CONFIG["geo_velocity_cap_kmh"],
@@ -269,11 +274,13 @@ def _calibrate(config):
 
 
 def _load_split_boundary(config):
-    """The exact event_id set models/train.py treated as the test split, derived from
-    features.csv so this module's split is guaranteed identical to the trained pipeline's."""
+    """The exact event_id set models/train.py treated as the held-out test split, derived
+    from features.csv so this module's split is guaranteed identical to the trained
+    pipeline's. Everything before train_fraction + val_fraction (train AND validation
+    combined) is warm-up history; only what's after is the true test period streamed below."""
     features = pd.read_csv(config["features_path"], usecols=["event_id", "timestamp"], parse_dates=["timestamp"])
     features = features.sort_values("timestamp").reset_index(drop=True)
-    cutoff = int(len(features) * config["train_fraction"])
+    cutoff = int(len(features) * (config["train_fraction"] + config["val_fraction"]))
     boundary_ts = features.loc[cutoff, "timestamp"]
     test_event_ids = set(features.loc[cutoff:, "event_id"])
     return boundary_ts, test_event_ids

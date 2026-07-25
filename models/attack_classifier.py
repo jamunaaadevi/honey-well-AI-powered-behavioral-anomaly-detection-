@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
 
 
 class AttackClassifier:
-    """Wraps sklearn's RandomForestClassifier over normal + the 5 attack labels."""
+    """Wraps sklearn's RandomForestClassifier over normal + the 7 attack labels."""
 
     def __init__(self, config=None):
         self.config = {**DEFAULT_CONFIG, **(config or {})}

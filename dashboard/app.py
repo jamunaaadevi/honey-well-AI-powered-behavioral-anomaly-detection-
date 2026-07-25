@@ -435,9 +435,13 @@ type, OR the Isolation Forest score lands in the top 0.5% most anomalous, OR the
 reconstruction error lands in the top 0.5% — a safety net (in either unsupervised direction)
 for attacks that don't match a known per-event pattern, surfaced as `unknown_anomaly`.
 
-**Risk scoring:** 60% classifier confidence + 40% normalized anomaly score → 0-100, mapped to
-low / medium / high / critical. `unknown_anomaly` events use the anomaly score alone, since the
-classifier itself has no attack-type opinion to weight in.
+**Risk scoring:** the analyst-facing risk score is 100x the pipeline's own validated
+`combined_risk` — the same 3-signal blend (classifier p_attack + Isolation Forest + LSTM
+sequence detector, weighted and selected on a held-out validation split) that drives the
+hybrid alert rule and the top-1% alert budget, not a separately recomputed blend. Mapped to
+low / medium / high / critical. `unknown_anomaly` events (classifier itself said "normal")
+use a pure IF+sequence blend instead, since the classifier has no attack-type opinion to
+weight in there.
 
 **Explainability:** a SHAP `TreeExplainer` on the Random Forest ranks which features pushed the
 prediction toward its predicted class (or away from "normal", for `unknown_anomaly` events),
