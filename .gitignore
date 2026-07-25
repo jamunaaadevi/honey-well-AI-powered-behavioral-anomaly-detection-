@@ -1,0 +1,15 @@
+# virtual environment
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# generated data + trained model artifacts (reproducible via the documented pipeline commands)
+data/*.csv
+data/*.json
+data/*.txt
+models/artifacts/
+
+# Streamlit
+.streamlit/secrets.toml
