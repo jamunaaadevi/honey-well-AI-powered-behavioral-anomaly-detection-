@@ -1,66 +1,61 @@
-# UEBA — AI-Powered Behavioral Anomaly Detection
+# AI-Powered Behavioral Anomaly Detection for Cybersecurity
 
-User and Entity Behavior Analytics (UEBA) system for cybersecurity, built for the
-Honeywell Hackathon. Generates synthetic access logs, engineers behavioral features,
-detects anomalies, classifies attack types, explains predictions with SHAP, and
-surfaces everything in an interactive Streamlit dashboard — plus a real-time
-streaming scorer and cold-start/insider-drift demos.
+A UEBA (User and Entity Behavior Analytics) system built for the Honeywell Hackathon.
+It learns what normal activity looks like for each user, service account, and device,
+flags anything unusual, explains why in plain English, and shows everything in a
+live dashboard. It also includes a real-time streaming scorer and demos for
+cold-start entities and behavior drift.
 
 ## Project layout
 
-- `data_gen/log_generator.py` — synthetic log generator: ~124k events for 200
-  entities (users/service accounts/edge devices) over 30 days, deterministic
-  (seed=42). Per-entity persistent profiles (home city, work hours, devices, usual
-  resources, auth method, session-duration distribution). Injects 7 labeled attack
-  types (brute_force, impossible_travel, lateral_movement, device_spoofing,
-  credential_misuse, credential_stuffing, low_and_slow_exfiltration) plus
-  insider_drift (legitimate footprint expansion, labeled normal, tracked separately
-  for the drift demo).
-- `features/feature_engineering.py` — builds per-entity baselines from each
-  entity's own *normal-labeled* history, then computes 28 features per event:
-  baseline-deviation flags, geo-velocity, 30-min rolling counts, cross-entity
-  source-IP features, and 7-day cumulative features. Fully vectorized.
-- `models/baseline_profile.py` — `EntityProfile`/`EntityProfileStore`: the formal
-  per-entity baseline (hour histogram, known countries/devices/resources/auth
-  methods/commands, session-duration stats), JSON-persisted.
-- `models/anomaly_detector.py`, `attack_classifier.py`, `sequence_detector.py` —
-  Isolation Forest (normal-only, unsupervised), Random Forest (all 8 labels,
-  balanced), LSTM autoencoder (PyTorch, normal-only, 10-event windows). Three
-  independent signals combined into a hybrid alert rule.
-- `models/entity_day_detector.py` — a second RandomForest over (entity, day)
-  aggregates to catch slow-accumulation patterns, wired into `train.py` with an
-  accept/revert gate on validation performance.
-- `models/train.py` — orchestrator. Chronological train/validation/test split;
-  all thresholds, safety-net percentiles, and combined-risk weighting are selected
-  on validation and evaluated once, frozen, on test. combined_risk uses
-  p_attack = 1 - P(normal), weighted 70% classifier / 10% IF / 20% sequence.
-  Also applies incident-aware linking as a supplementary output-only enrichment:
-  once one event of an `impossible_travel` incident is alerted, the entity's other
-  event in that incident is retroactively linked too (mirroring a SOC analyst
-  pulling recent history), tagged `linked_via_incident`/`linked_from_event_id` in
-  `predictions.csv`/`alerts.csv`. This never changes any metric computed before
-  it -- raw per-event recall stays honestly reported alongside the linked number.
-- `explain/shap_explainer.py`, `risk_scoring.py` — SHAP explanations (approximate
-  mode) with plain-English templates for every feature; risk_scoring.py computes
-  the analyst-facing 0-100 risk score/tier directly from the pipeline's validated
-  combined_risk and writes `data/alerts.csv`. `impossible_travel` alerts that were
-  backfilled by incident-linking (see below) get a plain-English linking sentence
-  instead of a misleading SHAP explanation on their by-design-normal-looking features.
-- `dashboard/app.py` — Streamlit UI: KPIs, live-replay mode, filterable alerts
-  table with SHAP detail view + analyst feedback buttons, analytics charts,
-  model-info tab. Alerts produced by incident-linking show a distinct "Linked
-  detection" badge instead of looking identical to an independently-caught alert.
-- `demo/cold_start_demo.py`, `drift_demo.py` — prove the system doesn't punish
-  novelty (new entities) or legitimate slow footprint expansion (drift entities)
-  with false alarms. `drift_demo.py` selects label-pure drift entities (100% true
-  label `normal` in their drift window) by default so its printed false-positive
-  rate isn't confounded by a coincidental, independently-injected real attack
-  landing in the same date range -- only 1 of 12 tracked drift entities is fully
-  clean; confounded entities are shown only as a clearly labeled secondary example.
-- `streaming/stream_scorer.py` — proves real-time feasibility: incremental
-  per-entity/per-IP state (no full-matrix recompute), single-event mode and
-  micro-batch mode, with calibration and warm-up excluded from latency
-  measurement.
+- `data_gen/log_generator.py` — synthetic login/access log generator
+  - 200 entities (users, service accounts, edge devices) over 30 days, ~124k events
+  - Same output every run (seed=42)
+  - Each entity gets a persistent profile: home city, work hours, devices, usual resources, auth method
+  - Injects 7 labeled attack types: brute force, impossible travel, lateral movement, device spoofing, credential misuse, credential stuffing, low-and-slow exfiltration
+  - Plus a legitimate "insider drift" pattern, used only for the drift demo
+
+- `features/feature_engineering.py` — turns raw logs into model-ready features
+  - Builds each entity's baseline from that entity's own normal-labeled history only
+  - Computes 28 behavioral features per event: baseline deviations, geo-velocity, rolling activity counts, and more
+
+- `models/baseline_profile.py` — the formal per-entity baseline profile
+  - Usual hours, countries, devices, resources, auth methods
+  - Saved as JSON
+
+- `models/anomaly_detector.py`, `attack_classifier.py`, `sequence_detector.py` — the three detection models
+  - Isolation Forest — unsupervised anomaly score
+  - Random Forest — names the likely attack type
+  - LSTM Autoencoder — watches sequences of events, not single events alone
+  - Their outputs combine into one hybrid alert rule
+
+- `models/entity_day_detector.py` — a second, experimental detector
+  - Looks at daily activity totals per entity
+  - Only kept if it actually improves results on validation data — right now it doesn't, so it's switched off
+
+- `models/train.py` — runs the whole training pipeline
+  - Splits data chronologically into train / validation / test
+  - Tunes every threshold and weight on validation only
+  - Checks everything once on test data it never touched
+  - Also links related events of a two-part `impossible_travel` attack together, the way a real analyst would, without changing any of the honestly-reported metrics
+
+- `explain/shap_explainer.py`, `risk_scoring.py` — explains and scores every alert
+  - Plain-English reason for every alert, using SHAP
+  - A 0–100 risk score per alert
+
+- `dashboard/app.py` — the analyst-facing dashboard
+  - Ranked alerts table
+  - Detail view with the reason for each flag
+  - Analytics charts
+  - A distinct badge for alerts caught through incident-linking
+
+- `demo/cold_start_demo.py`, `drift_demo.py` — prove the system doesn't cry wolf
+  - Cold-start: a brand-new entity with no history
+  - Drift: an entity whose legitimate behavior changes over time
+
+- `streaming/stream_scorer.py` — real-time scoring
+  - Scores events one at a time or in small batches
+  - Never recomputes everything from scratch
 
 ## Setup
 
@@ -82,12 +77,6 @@ streamlit run dashboard/app.py
 
 ## Known limitations
 
-- `unknown_anomaly` SHAP explanations use the classifier's attribution toward
-  "not normal" as a proxy; they are not a direct attribution from the Isolation
-  Forest or LSTM autoencoder, since tree-based SHAP doesn't apply to those model
-  types directly.
-- Only `impossible_travel` is evaluated incident-aware (either of its two events
-  counts as detection); other multi-event attack types are scored per-event, which
-  is a conservative lower bound on real-world SOC detection rate.
-- `true_label` is shown in the dashboard's alert detail view for demo/evaluation
-  purposes only — it would not be available at real inference time.
+- For alerts caught only by the safety-net models (not the classifier itself), the SHAP explanation is based on the classifier's general attribution, not a direct explanation from the Isolation Forest or LSTM.
+- Only `impossible_travel` is evaluated as a two-event incident. Other attack types are scored one event at a time, which is a stricter way to measure them.
+- The dashboard shows each event's true label for demo purposes only — that wouldn't be available in a real deployment.

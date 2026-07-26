@@ -229,11 +229,11 @@ def render_kpi_row(predictions, alerts):
 
 
 def render_live_mode(alerts):
-    st.subheader("🔴 Live Replay")
+    st.subheader("Live Replay")
     col1, col2, col3 = st.columns([2, 2, 1])
     n_replay = col1.slider("Events to replay", 10, len(alerts), min(150, len(alerts)), key="live_n")
     speed = col2.slider("Playback speed (sec/event)", 0.02, 0.5, 0.06, step=0.02, key="live_speed")
-    start = col3.button("▶ Start", type="primary", width="stretch")
+    start = col3.button("Start", type="primary", width="stretch")
 
     feed_area = st.empty()
     if start:
@@ -257,7 +257,7 @@ def render_live_mode(alerts):
             time.sleep(speed)
         st.success(f"Replay complete — streamed {len(subset)} alerts in timestamp order.")
     else:
-        feed_area.info("Configure playback above and press ▶ Start to replay alerts as a live feed.")
+        feed_area.info("Configure playback above and press Start to replay alerts as a live feed.")
     st.divider()
 
 
@@ -309,10 +309,10 @@ def render_alert_detail(event_id, alerts, logs, explainer):
 
     st.markdown("**Analyst verdict**")
     fb1, fb2, _ = st.columns([1, 1, 3])
-    if fb1.button("✅ Confirm threat", key=f"confirm_{event_id}", width="stretch"):
+    if fb1.button("Confirm threat", key=f"confirm_{event_id}", width="stretch"):
         record_feedback(event_id, "confirmed_threat", row)
         st.success("Recorded: confirmed threat.")
-    if fb2.button("❌ False positive", key=f"fp_{event_id}", width="stretch"):
+    if fb2.button("False positive", key=f"fp_{event_id}", width="stretch"):
         record_feedback(event_id, "false_positive", row)
         st.success("Recorded: false positive.")
 
@@ -499,7 +499,7 @@ converted into plain-English sentences via per-feature templates.
 # --------------------------------------------------------------------------------------
 
 def main():
-    st.set_page_config(page_title="UEBA Anomaly Detection", page_icon="🛡️", layout="wide")
+    st.set_page_config(page_title="AI-Powered Behavioral Anomaly Detection for Cybersecurity", layout="wide")
 
     predictions = load_predictions()
     annotated_predictions = build_annotated_predictions()
@@ -508,16 +508,16 @@ def main():
     explainer = load_explainer()
     scored = build_scored_test_set()
 
-    st.title("🛡️ UEBA — Behavioral Anomaly Detection")
+    st.title("AI-Powered Behavioral Anomaly Detection for Cybersecurity")
     st.caption("Two-stage anomaly detection over synthetic corporate access logs (test period).")
 
     render_kpi_row(predictions, alerts)
 
     st.sidebar.header("Controls")
-    st.sidebar.toggle("🔴 Live mode", value=False, key="live_mode")
+    st.sidebar.toggle("Live mode", value=False, key="live_mode")
     st.sidebar.caption("When on, the Alerts tab replays alerts as a live feed instead of a static table.")
 
-    tab_alerts, tab_analytics, tab_model = st.tabs(["🚨 Alerts", "📊 Analytics", "🧠 Model Info"])
+    tab_alerts, tab_analytics, tab_model = st.tabs(["Alerts", "Analytics", "Model Info"])
     with tab_alerts:
         render_alerts_tab(alerts, logs, explainer)
     with tab_analytics:
