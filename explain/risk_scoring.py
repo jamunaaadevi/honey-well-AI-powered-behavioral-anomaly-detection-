@@ -63,7 +63,8 @@ def compute_risk_scores(config=None):
         unknown_score = 100 * (normalized_anomaly + normalized_sequence) / 2
         risk_score = np.where(is_unknown, unknown_score, risk_score)
 
-    result = merged[["event_id", "user_id", "timestamp", "predicted_label", "true_label"]].copy()
+    result = merged[["event_id", "user_id", "timestamp", "predicted_label", "true_label",
+                      "linked_via_incident", "linked_from_event_id"]].copy()
     result["combined_risk"] = merged["combined_risk"].to_numpy()
     result["risk_score"] = risk_score.round(2)
     result["risk_tier"] = risk_tier(risk_score)
@@ -88,7 +89,8 @@ def main():
     alerts_df = compute_risk_scores(config)
     alerts_df = attach_explanations(alerts_df, config)
 
-    out_cols = ["event_id", "user_id", "timestamp", "predicted_label", "true_label", "risk_score", "risk_tier", "explanation"]
+    out_cols = ["event_id", "user_id", "timestamp", "predicted_label", "true_label", "risk_score", "risk_tier",
+                "linked_via_incident", "linked_from_event_id", "explanation"]
     out_df = alerts_df[out_cols].sort_values("risk_score", ascending=False).reset_index(drop=True)
 
     out_path = Path(config["alerts_path"])

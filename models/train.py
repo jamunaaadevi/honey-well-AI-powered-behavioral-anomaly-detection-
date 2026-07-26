@@ -170,9 +170,17 @@ def apply_incident_linking(test_df, alerted, y_pred, combined_risk, incident_gap
     unrelated daily activity) and gated on an ACTUAL alert firing (so it never invents
     a detection that didn't happen).
 
-    Returns (alerted, y_pred, combined_risk, linked_detected) -- new arrays, aligned to
-    test_df's row order; the inputs are not mutated. linked_detected is a bool array,
-    True for target_label rows that are anywhere in an incident with >=1 real hit.
+    Returns (alerted, y_pred, combined_risk, linked_detected, linked_via_incident,
+    linked_from_event_id) -- new arrays, aligned to test_df's row order; the inputs are
+    not mutated.
+      - linked_detected: bool, True for target_label rows anywhere in an incident with
+        >=1 real hit (both the genuinely-detected row AND the backfilled row).
+      - linked_via_incident: bool, True ONLY for rows that were actually backfilled
+        (incident_hit & ~own_hit_s) -- i.e. this row itself was NOT independently
+        alerted/classified correctly, and got its alert/label/risk from its companion.
+      - linked_from_event_id: str, the event_id of the companion event (the highest-risk
+        genuinely-detected row in the same incident) that triggered the link. Empty
+        string for rows that were not backfilled.
 
     Nothing computed BEFORE this is called (classification report, Combined Pipeline,
     Top-1% budget, PR-AUC) uses these return values -- this is only applied to the
@@ -183,10 +191,12 @@ def apply_incident_linking(test_df, alerted, y_pred, combined_risk, incident_gap
     y_pred = np.asarray(y_pred, dtype=object).copy()
     combined_risk = np.asarray(combined_risk, dtype=float).copy()
     linked_detected = np.zeros(len(test_df), dtype=bool)
+    linked_via_incident = np.zeros(len(test_df), dtype=bool)
+    linked_from_event_id = np.full(len(test_df), "", dtype=object)
 
     subset = test_df[test_df["label"] == target_label]
     if subset.empty:
-        return alerted, y_pred, combined_risk, linked_detected
+        return alerted, y_pred, combined_risk, linked_detected, linked_via_incident, linked_from_event_id
 
     own_hit = alerted[subset.index] & (y_pred[subset.index] == target_label)
     incident_id = _assign_incident_ids(subset, incident_gap_minutes)
@@ -196,13 +206,29 @@ def apply_incident_linking(test_df, alerted, y_pred, combined_risk, incident_gap
     risk_s = pd.Series(combined_risk[subset.index], index=subset.index)
     incident_max_risk = risk_s.groupby(incident_id).transform("max")
 
+    # companion event_id: within each incident, the genuinely-detected (own_hit) row
+    # with the highest risk -- the one a real analyst would have actually been looking
+    # at when they pulled the entity's recent history and found the other half.
+    own_only = pd.DataFrame({
+        "incident_id": incident_id,
+        "event_id": subset["event_id"],
+        "risk": risk_s,
+    }, index=subset.index)[own_hit_s.to_numpy()]
+    companion_by_incident = pd.Series(dtype=object)
+    if not own_only.empty:
+        idx_of_max = own_only.groupby("incident_id")["risk"].idxmax()
+        companion_by_incident = own_only.loc[idx_of_max].set_index("incident_id")["event_id"]
+    row_companion_event_id = pd.Series(incident_id, index=subset.index).map(companion_by_incident)
+
     to_backfill = subset.index[(incident_hit & ~own_hit_s).to_numpy()]
     alerted[to_backfill] = True
     y_pred[to_backfill] = target_label
     combined_risk[to_backfill] = incident_max_risk.loc[to_backfill].to_numpy()
 
     linked_detected[subset.index] = incident_hit.to_numpy()
-    return alerted, y_pred, combined_risk, linked_detected
+    linked_via_incident[to_backfill] = True
+    linked_from_event_id[to_backfill] = row_companion_event_id.loc[to_backfill].fillna("").to_numpy()
+    return alerted, y_pred, combined_risk, linked_detected, linked_via_incident, linked_from_event_id
 
 
 def build_training_labels(train_df, incident_gap_minutes):
@@ -685,7 +711,7 @@ def main():
     is_it = (y_test.to_numpy() == "impossible_travel")
     raw_recall_it = float((is_it & (y_pred == "impossible_travel")).sum() / is_it.sum()) if is_it.sum() else 0.0
 
-    linked_alerted, linked_y_pred, linked_combined_risk, linked_detected = apply_incident_linking(
+    linked_alerted, linked_y_pred, linked_combined_risk, linked_detected, linked_via_incident, linked_from_event_id = apply_incident_linking(
         test_df, hybrid_alerted, y_pred, combined_risk, config["incident_gap_minutes"], "impossible_travel"
     )
     linked_recall_it = float(linked_detected[is_it].mean()) if is_it.sum() else 0.0
@@ -710,6 +736,8 @@ def main():
         "alerted": linked_alerted,
         "predicted_label": predicted_label,
         "true_label": y_test.to_numpy(),
+        "linked_via_incident": linked_via_incident,
+        "linked_from_event_id": linked_from_event_id,
     })
     out_path = Path(config["predictions_path"])
     out_path.parent.mkdir(parents=True, exist_ok=True)

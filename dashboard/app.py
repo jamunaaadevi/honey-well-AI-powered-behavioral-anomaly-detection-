@@ -274,10 +274,20 @@ def render_alert_detail(event_id, alerts, logs, explainer):
     c4.metric("True label", row["true_label"])
     c5.metric("Entity type", entity_type)
 
+    if bool(row.get("linked_via_incident", False)):
+        st.markdown(badge_html("LINKED DETECTION", "#9085e9"), unsafe_allow_html=True)
+        st.caption(
+            f"This event was not independently detected — it was linked via incident "
+            f"correlation with event `{row['linked_from_event_id']}`, which was."
+        )
+
     st.markdown("**Top SHAP reasons**")
     try:
         for r in explainer.explain_event(event_id, top_n=5):
-            st.markdown(f"- `{r['shap_value']:+.3f}`  **{r['feature']}** — {r['sentence']}")
+            if r["is_linked"]:
+                st.markdown(f"- {r['sentence']}")
+            else:
+                st.markdown(f"- `{r['shap_value']:+.3f}`  **{r['feature']}** — {r['sentence']}")
     except KeyError:
         st.info("No SHAP explanation available for this event.")
 

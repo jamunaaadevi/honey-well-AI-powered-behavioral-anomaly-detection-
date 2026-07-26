@@ -127,6 +127,26 @@ class AlertExplainer:
         if event_id not in self._row_pos:
             raise KeyError(f"{event_id} has no computed SHAP values (not an alerted event)")
 
+        if bool(self.data.loc[event_id, "linked_via_incident"]):
+            # This row was never independently classified impossible_travel -- it was
+            # backfilled by models.train.apply_incident_linking because the entity's OTHER
+            # event in the same incident was. A normal SHAP explanation here would be
+            # misleading (it would explain why this event looks like nothing at all, since
+            # by construction its features are statistically indistinguishable from normal).
+            companion_event_id = self.data.loc[event_id, "linked_from_event_id"]
+            sentence = (
+                f"Flagged via incident linking: this entity's other event in the same "
+                f"session (event {companion_event_id}) was independently detected as "
+                f"impossible_travel."
+            )
+            return [{
+                "feature": None,
+                "shap_value": None,
+                "value": None,
+                "sentence": sentence,
+                "is_linked": True,
+            }]
+
         pos = self._row_pos[event_id]
         predicted_class = self.data.loc[event_id, "predicted_label"]
         if predicted_class == "unknown_anomaly":
@@ -149,6 +169,7 @@ class AlertExplainer:
                 "shap_value": float(sv),
                 "value": float(value),
                 "sentence": template(value),
+                "is_linked": False,
             })
         return results
 
@@ -171,7 +192,10 @@ def main():
     sample_event_id = explainer.data.index[0]
     print(f"Example explanation for {sample_event_id} (predicted: {explainer.data.loc[sample_event_id, 'predicted_label']}):")
     for item in explainer.explain_event(sample_event_id, top_n=5):
-        print(f"  [{item['shap_value']:+.4f}] {item['feature']}: {item['sentence']}")
+        if item["is_linked"]:
+            print(f"  [linked] {item['sentence']}")
+        else:
+            print(f"  [{item['shap_value']:+.4f}] {item['feature']}: {item['sentence']}")
 
 
 if __name__ == "__main__":
