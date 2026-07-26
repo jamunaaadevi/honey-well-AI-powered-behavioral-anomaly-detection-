@@ -34,16 +34,29 @@ streaming scorer and cold-start/insider-drift demos.
   all thresholds, safety-net percentiles, and combined-risk weighting are selected
   on validation and evaluated once, frozen, on test. combined_risk uses
   p_attack = 1 - P(normal), weighted 70% classifier / 10% IF / 20% sequence.
+  Also applies incident-aware linking as a supplementary output-only enrichment:
+  once one event of an `impossible_travel` incident is alerted, the entity's other
+  event in that incident is retroactively linked too (mirroring a SOC analyst
+  pulling recent history), tagged `linked_via_incident`/`linked_from_event_id` in
+  `predictions.csv`/`alerts.csv`. This never changes any metric computed before
+  it -- raw per-event recall stays honestly reported alongside the linked number.
 - `explain/shap_explainer.py`, `risk_scoring.py` — SHAP explanations (approximate
   mode) with plain-English templates for every feature; risk_scoring.py computes
   the analyst-facing 0-100 risk score/tier directly from the pipeline's validated
-  combined_risk and writes `data/alerts.csv`.
+  combined_risk and writes `data/alerts.csv`. `impossible_travel` alerts that were
+  backfilled by incident-linking (see below) get a plain-English linking sentence
+  instead of a misleading SHAP explanation on their by-design-normal-looking features.
 - `dashboard/app.py` — Streamlit UI: KPIs, live-replay mode, filterable alerts
   table with SHAP detail view + analyst feedback buttons, analytics charts,
-  model-info tab.
+  model-info tab. Alerts produced by incident-linking show a distinct "Linked
+  detection" badge instead of looking identical to an independently-caught alert.
 - `demo/cold_start_demo.py`, `drift_demo.py` — prove the system doesn't punish
   novelty (new entities) or legitimate slow footprint expansion (drift entities)
-  with false alarms.
+  with false alarms. `drift_demo.py` selects label-pure drift entities (100% true
+  label `normal` in their drift window) by default so its printed false-positive
+  rate isn't confounded by a coincidental, independently-injected real attack
+  landing in the same date range -- only 1 of 12 tracked drift entities is fully
+  clean; confounded entities are shown only as a clearly labeled secondary example.
 - `streaming/stream_scorer.py` — proves real-time feasibility: incremental
   per-entity/per-IP state (no full-matrix recompute), single-event mode and
   micro-batch mode, with calibration and warm-up excluded from latency
